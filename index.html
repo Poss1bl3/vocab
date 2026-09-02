@@ -122,6 +122,7 @@
   .btn.known:hover { filter: brightness(1.1); }
   .btn.primary { background: var(--accent); }
   .btn:disabled { opacity: .35; cursor: not-allowed; }
+  #rareBtn.rare-active { background: #f59e0b; border-color: #f59e0b; }
 
   /* 测验选项 */
   .options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; }
@@ -188,6 +189,7 @@
       <button class="chip bad" data-filter="unknown">错题</button>
       <button class="chip" data-filter="unseen">未学</button>
       <button class="chip good" data-filter="known">已掌握</button>
+      <button class="chip" data-filter="rare">生僻词</button>
     </div>
     <div class="sep"></div>
     <div class="ctrl-group">
@@ -204,6 +206,7 @@
     <div class="progressbar"><span id="progressFill" style="width:0%"></span></div>
     <span>掌握 <b id="knownCount" style="color:var(--green)">0</b></span>
     <span>待复习 <b id="unknownCount" style="color:var(--red)">0</b></span>
+    <span>生僻 <b id="rareCount" style="color:#f59e0b">0</b></span>
   </div>
 
   <div id="studyArea">
@@ -233,6 +236,7 @@
       <button class="btn primary" id="flipBtn">翻面</button>
       <button class="btn known" id="knownBtn">✓ 认识</button>
       <button class="btn ghost" id="nextBtn">下一个 →</button>
+      <button class="btn ghost" id="rareBtn">⭐ 生僻词</button>
     </div>
   </div>
 
@@ -296,6 +300,7 @@ const state = {
   idx: 0,
 };
 let progress = loadProgress();
+let rare = loadRare();
 
 function loadProgress() {
   try { return JSON.parse(localStorage.getItem('vocab_progress') || '{}'); }
@@ -303,6 +308,13 @@ function loadProgress() {
 }
 function saveProgress() {
   localStorage.setItem('vocab_progress', JSON.stringify(progress));
+}
+function loadRare() {
+  try { return new Set(JSON.parse(localStorage.getItem('vocab_rare') || '[]')); }
+  catch (e) { return new Set(); }
+}
+function saveRare() {
+  localStorage.setItem('vocab_rare', JSON.stringify([...rare]));
 }
 function shuffle(a) {
   a = a.slice();
@@ -316,9 +328,14 @@ function shuffle(a) {
 /* ---------- 词表构建 ---------- */
 function deck() {
   let list = WORDS.filter(w => state.group === 'all' || w.group === Number(state.group));
-  if (state.filter === 'unknown') list = list.filter(w => progress[w.id] === 'unknown');
-  else if (state.filter === 'known') list = list.filter(w => progress[w.id] === 'known');
-  else if (state.filter === 'unseen') list = list.filter(w => !(w.id in progress));
+  if (state.filter === 'rare') {
+    list = list.filter(w => rare.has(w.id));
+  } else {
+    list = list.filter(w => !rare.has(w.id));
+    if (state.filter === 'unknown') list = list.filter(w => progress[w.id] === 'unknown');
+    else if (state.filter === 'known') list = list.filter(w => progress[w.id] === 'known');
+    else if (state.filter === 'unseen') list = list.filter(w => !(w.id in progress));
+  }
   if (state.order === 'random') list = shuffle(list);
   return list;
 }
@@ -365,11 +382,13 @@ function render() {
   const known = curDeck.filter(w => progress[w.id] === 'known').length;
   const unknown = curDeck.filter(w => progress[w.id] === 'unknown').length;
 
+  const rareTotal = (state.group === 'all' ? WORDS : WORDS.filter(w => w.group === Number(state.group))).filter(w => rare.has(w.id)).length;
   $('#totalWords').textContent = WORDS.length;
   $('#deckSize').textContent = total;
   $('#doneCount').textContent = done;
   $('#knownCount').textContent = known;
   $('#unknownCount').textContent = unknown;
+  $('#rareCount').textContent = rareTotal;
   $('#progressFill').style.width = total ? (done / total * 100).toFixed(1) + '%' : '0%';
 
   const empty = total === 0;
@@ -389,6 +408,8 @@ function renderStudy() {
   const w = curDeck[state.idx];
   flipped = false;
   $('#card').classList.remove('flipped');
+  $('#rareBtn').textContent = rare.has(w.id) ? '⭐ 取消生僻' : '⭐ 生僻词';
+  $('#rareBtn').classList.toggle('rare-active', rare.has(w.id));
   const front = state.direction === 'en2cn' ? w.english : w.chinese;
   const frontPhon = state.direction === 'en2cn' ? w.phonetic : '';
   const back = state.direction === 'en2cn' ? w.chinese : w.english;
@@ -514,6 +535,13 @@ function mark(status) {
   saveProgress();
   nextWord();
 }
+function toggleRare() {
+  if (state.mode !== 'study' || !curDeck.length) return;
+  const w = curDeck[state.idx];
+  if (rare.has(w.id)) rare.delete(w.id); else rare.add(w.id);
+  saveRare();
+  render();
+}
 function flip() {
   if (state.mode === 'study' && curDeck.length) {
     flipped = !flipped;
@@ -555,6 +583,7 @@ $('#prevBtn').addEventListener('click', prevWord);
 $('#nextBtn').addEventListener('click', nextWord);
 $('#knownBtn').addEventListener('click', () => mark('known'));
 $('#unknownBtn').addEventListener('click', () => mark('unknown'));
+$('#rareBtn').addEventListener('click', toggleRare);
 $('#quizNextBtn').addEventListener('click', nextWord);
 $('#speakFront').addEventListener('click', e => { e.stopPropagation(); speak($('#frontWord').textContent); });
 $('#speakBack').addEventListener('click', e => { e.stopPropagation(); speak($('#backWord').textContent); });
@@ -568,7 +597,9 @@ $('#spellSpeak').addEventListener('click', () => { const w = curDeck[state.idx];
 $('#resetBtn').addEventListener('click', () => {
   if (confirm('确定清空所有学习进度吗？')) {
     progress = {};
+    rare = new Set();
     saveProgress();
+    saveRare();
     state.idx = 0;
     render();
   }
